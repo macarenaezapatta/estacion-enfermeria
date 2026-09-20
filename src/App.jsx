@@ -1,28 +1,9 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Estación de Valoración de Enfermería</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<style>
-  body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  .font-serif { font-family: Georgia, "Times New Roman", serif; }
-</style>
-</head>
-<body>
-<div id="root"></div>
-
-<script type="text/babel" data-type="module">
-import React, { useState, useMemo, useEffect } from "https://esm.sh/react@18.2.0";
-import ReactDOM from "https://esm.sh/react-dom@18.2.0/client";
+import React, { useState, useMemo, useEffect } from 'react';
+import { createClient } from '@supabase/supabase-js';
 import {
   ClipboardList,
   FileText,
   Pill,
-  ChevronDown,
   Plus,
   Trash2,
   Copy,
@@ -33,19 +14,16 @@ import {
   Syringe,
   AlertTriangle,
   BookOpen,
-  ThumbsUp,
-  ListChecks,
   LogOut,
   ShieldCheck,
-  Lock
-} from "https://esm.sh/lucide-react@0.383.0?deps=react@18.2.0";
+} from 'lucide-react';
 
 /* ============================================================
    CONFIGURACIÓN DE SUPABASE
 ============================================================ */
-const SUPABASE_URL = 'https://eclerhfdcakhslcblvjf.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjbGVyaGZkY2FraHNsY2JsdmpmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk4MTI1MjEsImV4cCI6MjEwNTM4ODUyMX0.Q0QkELKq-cupmaoktH0Hb-BSU24I_qMDnlAepz1gtRI';
-const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseClient = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 /* ============================================================
    TOKENS DE DISEÑO
@@ -222,7 +200,7 @@ const VADEMECUM = [
   { id: 16, nombre: "Ondansetrón", comercial: "Zofran®", familia: "Antiemético (antagonista 5-HT3)", vias: ["EV", "VO"], dosis: "4-8 mg cada 8 h", dosisPed: "0,15 mg/kg/dosis EV (máx. 4–8mg)", dilucion: "Diluir en 50 ml de SF 0.9%, a pasar en 15 min", efectos: "Cefalea, estreñimiento, prolongación del intervalo QT", cuidados: "Precaución en pacientes con antecedentes de arritmias; monitorear ECG si hay factores de riesgo." },
   { id: 17, nombre: "Dexametasona", comercial: "Decadron®", familia: "Corticoide", vias: ["EV", "IM", "VO"], dosis: "4-8 mg cada 8-24 h según indicación", dosisPed: "0,15–0,6 mg/kg/dosis según indicación (ej. laringitis/crup)", dilucion: "Administrar EV directo lento o diluido en 50-100 ml de SF", efectos: "Hiperglucemia, retención hidrosalina, inmunosupresión", cuidados: "Controlar glucemia; no suspender bruscamente en tratamientos prolongados." },
   { id: 18, nombre: "Hidrocortisona", comercial: "Solu-Cortef®", familia: "Corticoide", vias: ["EV", "IM"], dosis: "100-300 mg/día según indicación (shock, insuficiencia suprarrenal)", dosisPed: "Manejo especializado en pediatría/UTI pediátrica-neonatal según protocolo — no estandarizada en esta referencia general, consultar al equipo tratante.", dilucion: "Diluir en 100 ml de SF 0.9%, a pasar en 20-30 min", efectos: "Hiperglucemia, hipertensión, retención de líquidos", cuidados: "Monitorear glucemia y balance hidroelectrolítico durante tratamientos prolongados." },
-  { id: 19, nombre: "Betametasona", comercial: "Celestone®", familia: "Corticoide", vias: ["EV", "IM"], dosis: "4-12 mg/día según indicación", dosisPed: "Manejo especializado en pediatría/UTI pediátrica-neonatal según protocolo — no estandarizada en esta referencia general, consultar al equipo tratante.", dilucion: "Administrar EV directo lento o diluido en 50-100 ml de SF", efectos: "Hiperglucemia, hipertensión, insomnio", cuidados: "Controlar glucemia; en maduración pulmonar fetal seguir esquema obstétrico específico." },
+  { id: 19, nombre: "Betametasona", comercial: "Celestone®", familia: "Corticoide", vias: ["EV", "IM"], dosis: "4-12 mg/día según indicación", dosisPed: "Manejo especializado en pediatría/UTI pediátrica-neonatal según protocolo — no estandarizada en esta referencia general, consultar al equipo tratante.", dilucion: "Administrar EV directo lento o diluido en 50-100 ml de SF", efectos: "Hiperglucemia, hipertensión, inmunosupresión", cuidados: "Controlar glucemia; en maduración pulmonar fetal seguir esquema obstétrico específico." },
   { id: 20, nombre: "Difenhidramina", comercial: "Benadryl®", familia: "Antihistamínico H1", vias: ["EV", "IM", "VO"], dosis: "25-50 mg cada 6-8 h", dosisPed: "1 mg/kg/dosis EV/IM/VO cada 6–8h (máx. 50mg/dosis)", dilucion: "Diluir en 50-100 ml de SF 0.9%, a pasar en 15-20 min", efectos: "Sedación marcada, sequedad de mucosas, hipotensión", cuidados: "Advertir somnolencia; precaución en adultos mayores por riesgo de caídas y confusión." },
   { id: 21, nombre: "Salbutamol", comercial: "Ventolin®", familia: "Beta-2 agonista de acción corta", vias: ["Inhalatoria"], dosis: "2-4 disparos (100-200 mcg) o nebulización con 0.5-1 ml + 3 ml de SF", dosisPed: "2–4 puff con aerocámara según protocolo · Nebulizado 0,15 mg/kg (mín. 2,5mg)", dilucion: "Nebulizar diluido en 3-4 ml de SF 0.9% con flujo de O2 a 6-8 l/min", efectos: "Taquicardia, temblor, palpitaciones", cuidados: "Controlar frecuencia cardíaca; espaciar dosis en pacientes cardiópatas." },
   { id: 22, nombre: "Ipratropio (Bromuro)", comercial: "Atrovent®", familia: "Anticolinérgico inhalatorio", vias: ["Inhalatoria"], dosis: "0.5 mg (2 ml) por nebulización cada 6-8 h", dosisPed: "250 mcg nebulizado cada 6–8h, asociado a salbutamol", dilucion: "Nebulizar solo o combinado con salbutamol, diluido en SF 0.9%", efectos: "Sequedad bucal, retención urinaria, visión borrosa", cuidados: "Evitar contacto con los ojos durante la nebulización; precaución en glaucoma." },
@@ -762,8 +740,3 @@ export default function App() {
     </div>
   );
 }
-
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
-</script>
-</body>
-</html>
