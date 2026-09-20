@@ -231,6 +231,7 @@ export default function App() {
   const [firmado, setFirmado] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [modoRegistro, setModoRegistro] = useState(false);
   const [nombreFirmante, setNombreFirmante] = useState('');
   const [aceptoTerminos, setAceptoTerminos] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -262,11 +263,21 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const handleLogin = async (e) => {
+  const handleAuth = async (e) => {
     e.preventDefault();
     setLoading(true);
-    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-    if (error) alert('Error de autenticación: ' + error.message);
+    if (modoRegistro) {
+      const { data, error } = await supabaseClient.auth.signUp({ email, password });
+      if (error) {
+        alert('Error al registrar: ' + error.message);
+      } else if (data.user && !data.session) {
+        alert('Cuenta creada. Ahora ingresá con tu correo y contraseña.');
+        setModoRegistro(false);
+      }
+    } else {
+      const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+      if (error) alert('Error de autenticación: ' + error.message);
+    }
     setLoading(false);
   };
 
@@ -425,19 +436,24 @@ export default function App() {
             <h1 className="text-2xl font-bold text-[#1E3547]">Estación de Valoración</h1>
             <p className="text-xs text-gray-500 mt-1">Acceso institucional a la plataforma clínica</p>
           </div>
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form onSubmit={handleAuth} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-[#1E3547] mb-1">Correo institucional</label>
               <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full p-2.5 text-sm border border-[#DCE7E6] rounded-md outline-none focus:ring-2 focus:ring-[#0B6E6E]" placeholder="estudiante@institucion.edu.ar" />
             </div>
             <div>
               <label className="block text-xs font-semibold text-[#1E3547] mb-1">Contraseña</label>
-              <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full p-2.5 text-sm border border-[#DCE7E6] rounded-md outline-none focus:ring-2 focus:ring-[#0B6E6E]" placeholder="••••••••" />
+              <input type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} className="w-full p-2.5 text-sm border border-[#DCE7E6] rounded-md outline-none focus:ring-2 focus:ring-[#0B6E6E]" placeholder="••••••••" />
             </div>
             <button type="submit" disabled={loading} className="w-full bg-[#0B6E6E] hover:bg-[#075252] text-white py-3 rounded-md font-bold text-sm transition-colors shadow">
-              {loading ? 'Validando...' : 'Ingresar al Sistema'}
+              {loading ? (modoRegistro ? 'Creando cuenta...' : 'Validando...') : (modoRegistro ? 'Crear Cuenta' : 'Ingresar al Sistema')}
             </button>
           </form>
+          <div className="text-center mt-4">
+            <button onClick={() => setModoRegistro(!modoRegistro)} className="text-xs text-[#0B6E6E] hover:text-[#075252] font-semibold underline">
+              {modoRegistro ? '¿Ya tenés cuenta? Ingresar' : '¿No tenés cuenta? Registrarse'}
+            </button>
+          </div>
         </div>
       </div>
     );
