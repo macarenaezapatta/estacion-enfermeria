@@ -21,9 +21,9 @@ import {
 /* ============================================================
    CONFIGURACIÓN DE SUPABASE
 ============================================================ */
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const supabaseClient = createClient(SUPABASE_URL, SUPABASE_KEY);
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const supabaseClient = createClient(SUPABASE_URL || 'https://placeholder.supabase.co', SUPABASE_KEY || 'placeholder-key');
 
 /* ============================================================
    TOKENS DE DISEÑO
