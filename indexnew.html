@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Estación de Valoración de Enfermería</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .font-serif { font-family: Georgia, "Times New Roman", serif; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-type="module">
+import React, { useState, useMemo, useEffect } from "https://esm.sh/react@18.2.0";
+import ReactDOM from "https://esm.sh/react-dom@18.2.0/client";
+import {
+  ClipboardList,
+  FileText,
+  Pill,
+  ChevronDown,
+  Plus,
+  Trash2,
+  Copy,
+  Check,
+  Search,
+  Activity,
+  Stethoscope,
+  Syringe,
+  AlertTriangle,
+  BookOpen,
+  ThumbsUp,
+  ListChecks,
+  LogOut,
+  ShieldCheck,
+  Lock
+} from "https://esm.sh/lucide-react@0.383.0?deps=react@18.2.0";
+
+/* ============================================================
+   CONFIGURACIÓN DE SUPABASE
+============================================================ */
+const SUPABASE_URL = 'https://eclerhfdcakhslcblvjf.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjbGVyaGZkY2FraHNsY2JsdmpmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk4MTI1MjEsImV4cCI6MjEwNTM4ODUyMX0.Q0QkELKq-cupmaoktH0Hb-BSU24I_qMDnlAepz1gtRI';
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+/* ============================================================
+   TOKENS DE DISEÑO
+============================================================ */
+const COLORS = {
+  teal: "#0B6E6E",
+  tealDark: "#075252",
+  slate: "#1E3547",
+  bg: "#F3F6F6",
+  card: "#FFFFFF",
+  border: "#DCE7E6",
+  amber: "#9A5B13",
+  amberBg: "#FBF1E3",
+};
+
+/* ============================================================
+   EDAD Y FRANJAS ETARIAS
+============================================================ */
+function edadEnMeses(edad, unidad) {
+  if (edad === undefined || edad === null || edad === "") return null;
+  const n = +edad;
+  if (isNaN(n)) return null;
+  if (unidad === "Días") return n / 30;
+  if (unidad === "Meses") return n;
+  return n * 12; // "Años" o sin especificar
+}
+
+const FRANJAS_ETARIAS = [
+  { id: "neonato", label: "neonato (0-28 días)", maxMeses: 1, fc: [100, 180], fr: [30, 60], tas: [60, 90] },
+  { id: "lactante", label: "lactante (1-11 meses)", maxMeses: 12, fc: [100, 170], fr: [24, 38], tas: [70, 100] },
+  { id: "preescolar1", label: "niño/a de 1-2 años", maxMeses: 36, fc: [98, 140], fr: [22, 30], tas: [80, 110] },
+  { id: "preescolar2", label: "niño/a de 3-4 años", maxMeses: 60, fc: [80, 120], fr: [20, 28], tas: [80, 115] },
+  { id: "escolar", label: "niño/a de 5-11 años", maxMeses: 144, fc: [70, 110], fr: [18, 24], tas: [85, 120] },
+  { id: "adolescente", label: "adolescente de 12-17 años", maxMeses: 216, fc: [60, 100], fr: [12, 22], tas: [95, 130] },
+  { id: "adulto", label: "adulto", maxMeses: Infinity, fc: [60, 100], fr: [12, 20], tas: [90, 140] },
+];
+
+function franjaEtaria(edadMeses) {
+  if (edadMeses === null) return FRANJAS_ETARIAS[FRANJAS_ETARIAS.length - 1];
+  return FRANJAS_ETARIAS.find((f) => edadMeses <= f.maxMeses) || FRANJAS_ETARIAS[FRANJAS_ETARIAS.length - 1];
+}
+
+/* ============================================================
+   UTILIDADES CLÍNICAS
+============================================================ */
+function interpretaTA(s, d, edadMeses) {
+  if (!s || !d) return null;
+  s = +s; d = +d;
+  const franja = franjaEtaria(edadMeses);
+  const [tasMin, tasMax] = franja.tas;
+  if (s < tasMin) return { texto: `hipotensión arterial para ${franja.label}`, alerta: true };
+  if (s > tasMax || d >= 90) return { texto: `hipertensión arterial para ${franja.label}`, alerta: true };
+  return { texto: "tensión arterial dentro de parámetros esperados para la edad", alerta: false };
+}
+function interpretaFC(fc, edadMeses) {
+  if (!fc) return null;
+  fc = +fc;
+  const franja = franjaEtaria(edadMeses);
+  const [min, max] = franja.fc;
+  if (fc > max) return { texto: `taquicardia para ${franja.label}`, alerta: true };
+  if (fc < min) return { texto: `bradicardia para ${franja.label}`, alerta: true };
+  return { texto: "frecuencia cardíaca dentro de parámetros esperados para la edad", alerta: false };
+}
+function interpretaFR(fr, edadMeses) {
+  if (!fr) return null;
+  fr = +fr;
+  const franja = franjaEtaria(edadMeses);
+  const [min, max] = franja.fr;
+  if (fr > max) return { texto: `taquipnea para ${franja.label}`, alerta: true };
+  if (fr < min) return { texto: `bradipnea para ${franja.label}`, alerta: true };
+  return { texto: "frecuencia respiratoria dentro de parámetros esperados para la edad", alerta: false };
+}
+function interpretaTemp(t) {
+  if (!t) return null;
+  t = +t;
+  if (t >= 39) return { texto: "hipertermia", alerta: true };
+  if (t >= 37.6) return { texto: "febrícula", alerta: true };
+  if (t < 36) return { texto: "hipotermia", alerta: true };
+  return { texto: "afebril", alerta: false };
+}
+function interpretaSat(s) {
+  if (!s) return null;
+  s = +s;
+  if (s < 90) return { texto: "hipoxemia severa", alerta: true };
+  if (s < 95) return { texto: "hipoxemia leve a moderada", alerta: true };
+  return { texto: "saturación de oxígeno adecuada", alerta: false };
+}
+function totalGlasgow(g) {
+  const o = +g.ocular || 0, v = +g.verbal || 0, m = +g.motora || 0;
+  const total = o + v + m;
+  return total > 0 ? total : null;
+}
+function interpretaGlasgow(total) {
+  if (total === null) return null;
+  if (total >= 15) return "lúcido, orientado en tiempo y espacio, con Glasgow 15/15";
+  if (total >= 13) return `Glasgow de ${total}/15, compatible con compromiso leve del sensorio`;
+  if (total >= 9) return `Glasgow de ${total}/15, compatible con compromiso moderado del sensorio`;
+  return `Glasgow de ${total}/15, compatible con compromiso severo del sensorio`;
+}
+
+/* ============================================================
+   CONFIGURACIÓN DE CAMPOS Y VADEMÉCUM
+============================================================ */
+const SEXO_OPCIONES = ["Femenino", "Masculino", "Otro / No binario"];
+const CIUDAD_RESIDENCIA_OPCIONES = [
+  "Ciudad Autónoma de Buenos Aires (CABA)", "Buenos Aires (provincia)", "Catamarca", "Chaco", "Chubut", "Córdoba", "Corrientes", "Entre Ríos", "Formosa", "Jujuy", "La Pampa", "La Rioja", "Mendoza", "Misiones", "Neuquén", "Río Negro", "Salta", "San Juan", "San Luis", "Santa Cruz", "Santa Fe", "Santiago del Estero", "Tierra del Fuego", "Tucumán", "Otra / Fuera de Argentina"
+];
+const ACOMPANANTE_OPCIONES = [
+  "Solo/a (sin acompañante)", "Familiar", "Paciente social (sin referente familiar)", "Amigo/a", "Personal de institución / cuidador", "Otro"
+];
+
+const FILIACION_FIELDS = [
+  { key: "nombre", label: "Nombre y apellido", type: "text", placeholder: "Ej. Tiziana Gómez" },
+  { key: "edad", label: "Edad", type: "number", placeholder: "Ej: 5" },
+  { key: "unidadEdad", label: "Unidad de edad", type: "select", options: ["Años", "Meses", "Días"] },
+  { key: "sexo", label: "Sexo", type: "select", options: SEXO_OPCIONES },
+  { key: "domicilio", label: "Domicilio", type: "text", placeholder: "Calle, número, localidad, partido" },
+  { key: "ciudadResidencia", label: "Ciudad / Provincia de residencia", type: "select", options: CIUDAD_RESIDENCIA_OPCIONES },
+  { key: "motivo", label: "Motivo de ingreso / cirugía", type: "text", placeholder: "Ej. apendicitis aguda" },
+  { key: "ayuno", label: "Horas de ayuno", type: "text", placeholder: "Ej. 8" },
+  { key: "tiempoQx", label: "Tiempo quirúrgico transcurrido", type: "text", placeholder: "Ej. 12 horas" },
+  { key: "acompanante", label: "Acompañante", type: "select", options: ACOMPANANTE_OPCIONES },
+  { key: "acompananteDetalle", label: "Detalle del acompañante (opcional)", type: "text", placeholder: "Ej. su madre, vecino, tutor legal..." },
+  { key: "tabaco", label: "Consumo de tabaco", type: "select", options: ["Refiere", "Niega"] },
+  { key: "alcohol", label: "Consumo de alcohol", type: "select", options: ["Refiere", "Niega"] },
+  { key: "estudios", label: "Estudios complementarios", type: "textarea", placeholder: "Laboratorio, imágenes, ECG..." },
+];
+
+const EXAMEN_SECCIONES = [
+  { id: "cefalico", titulo: "Cabeza, cara y cuello", icon: Stethoscope, campos: [
+    { key: "pupilas", label: "Pupilas", type: "select", options: ["Isocóricas normorreactivas", "Anisocoria", "Midriasis", "Miosis"] },
+    { key: "mucosas", label: "Mucosas", type: "select", options: ["Rosadas y húmedas", "Pálidas", "Secas", "Cianóticas"] },
+    { key: "carotideo", label: "Pulso carotídeo", type: "select", options: ["Simétrico y de buena amplitud", "Disminuido", "Ausente"] },
+  ]},
+  { id: "torax", titulo: "Tórax y cardiopulmonar", icon: Activity, campos: [
+    { key: "mecanica", label: "Mecánica respiratoria", type: "select", options: ["Eupneico, sin tiraje", "Taquipneico con tiraje", "Bradipneico", "Uso de músculos accesorios"] },
+    { key: "auscultacion", label: "Auscultación", type: "select", options: ["Murmullo vesicular conservado bilateral", "Rales", "Sibilancias", "Crepitantes", "Hipoventilación"] },
+  ]},
+  { id: "abdomen", titulo: "Abdomen y región lumbar", icon: ClipboardList, campos: [
+    { key: "rha", label: "Ruidos hidroaéreos (RHA)", type: "select", options: ["Presentes y normoactivos", "Aumentados", "Disminuidos", "Ausentes"] },
+    { key: "palpacion", label: "Palpación abdominal", type: "select", options: ["Blando, depresible e indoloro", "Doloroso a la palpación", "Distendido", "Defensa abdominal"] },
+    { key: "giordano", label: "Signo de Giordano", type: "select", options: ["Negativo bilateral", "Positivo derecho", "Positivo izquierdo", "Positivo bilateral"] },
+  ]},
+  { id: "extremidades", titulo: "Extremidades", icon: Activity, campos: [
+    { key: "pulsos", label: "Pulsos periféricos", type: "select", options: ["Presentes y simétricos", "Disminuidos", "Ausentes"] },
+    { key: "llenado", label: "Llenado capilar", type: "select", options: ["Menor a 2 segundos", "Mayor a 2 segundos"] },
+    { key: "edema", label: "Edema / fóvea", type: "select", options: ["Sin edema", "Fóvea +", "Fóvea ++", "Fóvea +++"] },
+    { key: "fuerza", label: "Fuerza muscular", type: "select", options: ["Conservada 5/5 en las cuatro extremidades", "Disminuida", "Plejia/paresia focal"] },
+  ]},
+  { id: "piel", titulo: "Piel, faneras y dispositivos", icon: Syringe, campos: [
+    { key: "riesgoLPP", label: "Riesgo de LPP", type: "select", options: ["Bajo riesgo", "Riesgo moderado", "Alto riesgo"] },
+    { key: "viasPerif", label: "Vías periféricas", type: "text", placeholder: "Ej. Vía periférica N°20 en MSD, permeable" },
+    { key: "sondas", label: "Sondas", type: "text", placeholder: "Ej. sonda vesical permeable" },
+    { key: "drenajes", label: "Drenajes", type: "text", placeholder: "Ej. drenaje tipo Kher, débito seroso" },
+  ]},
+];
+
+const VADEMECUM = [
+  { id: 1, nombre: "Dipirona (Metamizol)", comercial: "Novalgina®", familia: "Analgésico / Antipirético", vias: ["EV", "IM", "VO"], dosis: "1 g EV/IM cada 6-8 h; máx. 4 g/día", dosisPed: "10–20 mg/kg/dosis EV/VO cada 6–8h", dilucion: "Diluir 1 g en 100 ml de SF 0.9% o Dx 5%, a pasar en 20-30 min", efectos: "Hipotensión (por infusión rápida), reacciones alérgicas, agranulocitosis (rara)", cuidados: "Administrar EV lento y diluido; controlar TA durante la infusión; no administrar en bolo directo." },
+  { id: 2, nombre: "Paracetamol", comercial: "Genol®, Tafirol®", familia: "Analgésico / Antipirético", vias: ["EV", "VO"], dosis: "500-1000 mg cada 6-8 h; máx. 4 g/día", dosisPed: "10–15 mg/kg/dosis cada 4–6h (máx. 75 mg/kg/día, sin superar dosis de adulto)", dilucion: "EV: frasco listo para infundir en 15 min (no requiere dilución adicional)", efectos: "Hepatotoxicidad en sobredosis, reacciones cutáneas raras", cuidados: "Vigilar dosis acumulada diaria; precaución en hepatopatía; no exceder dosis máxima." },
+  { id: 3, nombre: "Ketorolac", comercial: "Toradol®", familia: "AINE", vias: ["EV", "IM"], dosis: "30 mg EV/IM cada 6-8 h; máx. 5 días de uso", dosisPed: "Uso restringido y de corta duración, bajo indicación especializada", dilucion: "Puede administrarse EV directo lento (>15 seg) o diluido en 50-100 ml de SF", efectos: "Sangrado digestivo, nefrotoxicidad, broncoespasmo", cuidados: "No usar más de 5 días; evitar en insuficiencia renal y antecedentes de úlcera péptica." },
+  { id: 4, nombre: "Morfina", comercial: "Morfina Clorhidrato®", familia: "Opioide", vias: ["EV", "IM", "SC"], dosis: "2-4 mg EV cada 4 h según escala de dolor", dosisPed: "Manejo especializado en pediatría/UTI pediátrica-neonatal según protocolo — no estandarizada en esta referencia general, consultar al equipo tratante. Dosis de referencia habitual 0,05–0,1 mg/kg/dosis, siempre titulada y monitoreada.", dilucion: "Diluir en 10 ml de SF para titulación EV lenta", efectos: "Depresión respiratoria, hipotensión, sedación, náuseas", cuidados: "Controlar frecuencia respiratoria y sedación; tener naloxona disponible; doble chequeo por ser opioide." },
+  { id: 5, nombre: "Tramadol", comercial: "Tramal®", familia: "Opioide débil", vias: ["EV", "IM", "VO"], dosis: "50-100 mg cada 6-8 h; máx. 400 mg/día", dosisPed: "Evitar de rutina en <12 años por riesgo de depresión respiratoria; solo bajo indicación especializada", dilucion: "Diluir en 100 ml de SF 0.9%, a pasar en 20-30 min", efectos: "Náuseas, vómitos, mareos, convulsiones (dosis altas)", cuidados: "Administrar lento para evitar náuseas; precaución con otros depresores del SNC." },
+  { id: 6, nombre: "Fentanilo", comercial: "Fentanest®", familia: "Opioide potente", vias: ["EV", "IM"], dosis: "1-2 mcg/kg EV; uso en anestesia/analgesia intensiva", dosisPed: "Manejo especializado en pediatría/UTI pediátrica-neonatal según protocolo — no estandarizada en esta referencia general, consultar al equipo tratante.", dilucion: "Uso EV directo lento o en bomba de infusión continua según protocolo", efectos: "Depresión respiratoria severa, rigidez torácica, bradicardia", cuidados: "Monitoreo continuo de saturación y frecuencia respiratoria; manejo exclusivo en áreas críticas/anestesia." },
+  { id: 7, nombre: "Ampicilina", comercial: "Ampicilina Richet®", familia: "Antibiótico betalactámico", vias: ["EV", "IM"], dosis: "1-2 g cada 6 h", dosisPed: "100–200 mg/kg/día EV cada 6h", dilucion: "Diluir en 100 ml de SF 0.9%, a pasar en 30 min", efectos: "Reacciones alérgicas, rash, diarrea", cuidados: "Investigar alergia a penicilinas antes de administrar; observar 20 min post primera dosis." },
+  { id: 8, nombre: "Cefazolina", comercial: "Kefazol®", familia: "Cefalosporina de 1ª generación", vias: ["EV", "IM"], dosis: "1-2 g cada 8 h (profilaxis quirúrgica: 1-2 g preinducción)", dosisPed: "25–50 mg/kg/dosis cada 8h (profilaxis quirúrgica: 30 mg/kg preinducción)", dilucion: "Diluir en 100 ml de SF 0.9%, a pasar en 30 min", efectos: "Reacciones alérgicas, flebitis en el sitio de infusión", cuidados: "Administrar dentro de los 60 min previos a la incisión quirúrgica si es profilaxis; vigilar vía periférica." },
+  { id: 9, nombre: "Ceftriaxona", comercial: "Rocefin®", familia: "Cefalosporina de 3ª generación", vias: ["EV", "IM"], dosis: "1-2 g cada 12-24 h", dosisPed: "50–100 mg/kg/día EV/IM cada 12–24h", dilucion: "Diluir 1 g en 100 ml de SF 0.9% (no usar soluciones con calcio en neonatos), a pasar en 30 min", efectos: "Reacciones alérgicas, diarrea, seudolitiasis biliar", cuidados: "No mezclar con soluciones que contengan calcio; controlar reacción alérgica en primeras dosis." },
+  { id: 10, nombre: "Vancomicina", comercial: "Vancocina®", familia: "Glucopéptido", vias: ["EV"], dosis: "1 g cada 12 h (según función renal)", dosisPed: "Manejo especializado en pediatría/UTI pediátrica-neonatal según protocolo — no estandarizada en esta referencia general, consultar al equipo tratante.", dilucion: "Diluir en 200-250 ml de SF 0.9%, a pasar en no menos de 60 minutos", efectos: "Síndrome del hombre rojo, ototoxicidad, nefrotoxicidad", cuidados: "Infundir lento (mínimo 60 min) para evitar síndrome del hombre rojo; monitorear función renal." },
+  { id: 11, nombre: "Metronidazol", comercial: "Flagyl®", familia: "Antibacteriano / Antiparasitario", vias: ["EV", "VO"], dosis: "500 mg cada 8 h", dosisPed: "7,5–10 mg/kg/dosis EV/VO cada 8h", dilucion: "Administrar EV directo en 30-60 min (presentación lista para infundir)", efectos: "Sabor metálico, náuseas, neuropatía periférica (uso prolongado)", cuidados: "Advertir sobre efecto disulfiram-like con alcohol; proteger de la luz durante la infusión." },
+  { id: 12, nombre: "Gentamicina", comercial: "Gentamicina Richet®", familia: "Aminoglucósido", vias: ["EV", "IM"], dosis: "3-5 mg/kg/día cada 8-24 h", dosisPed: "5–7,5 mg/kg/día EV/IM (esquema distinto en neonatos)", dilucion: "Diluir en 100 ml de SF 0.9%, a pasar en 30-60 min", efectos: "Nefrotoxicidad, ototoxicidad", cuidados: "Controlar función renal y audición; medir niveles séricos si tratamiento prolongado." },
+  { id: 13, nombre: "Ranitidina", comercial: "Cronicidina®", familia: "Antagonista H2 / Gastroprotector", vias: ["EV", "VO"], dosis: "50 mg cada 8 h EV", dosisPed: "2–4 mg/kg/día EV/VO dividida cada 12h", dilucion: "Diluir en 20-100 ml de SF 0.9%, a pasar en 15-20 min", efectos: "Cefalea, mareos, bradicardia (infusión rápida)", cuidados: "Administrar lento para evitar arritmias; disponibilidad limitada en Argentina, verificar vademécum vigente." },
+  { id: 14, nombre: "Omeprazol", comercial: "Losec®", familia: "Inhibidor de la bomba de protones", vias: ["EV", "VO"], dosis: "40 mg cada 24 h EV", dosisPed: "0,7–1 mg/kg/día EV/VO según indicación", dilucion: "Diluir en 100 ml de SF 0.9%, a pasar en 20-30 min, proteger de la luz", efectos: "Cefalea, diarrea, hipomagnesemia (uso prolongado)", cuidados: "Proteger la solución de la luz; no mezclar con otros fármacos en la misma vía." },
+  { id: 15, nombre: "Metoclopramida", comercial: "Reliverán®", familia: "Antiemético / Procinético", vias: ["EV", "IM", "VO"], dosis: "10 mg cada 8 h", dosisPed: "Evitar en <1 año por riesgo de reacciones extrapiramidales; uso limitado a indicación puntual", dilucion: "Administrar EV lento (2-3 min) directo o diluido en 50 ml de SF", efectos: "Síntomas extrapiramidales, somnolencia, distonía aguda", cuidados: "Administrar lento; vigilar aparición de movimientos anormales, especialmente en jóvenes." },
+  { id: 16, nombre: "Ondansetrón", comercial: "Zofran®", familia: "Antiemético (antagonista 5-HT3)", vias: ["EV", "VO"], dosis: "4-8 mg cada 8 h", dosisPed: "0,15 mg/kg/dosis EV (máx. 4–8mg)", dilucion: "Diluir en 50 ml de SF 0.9%, a pasar en 15 min", efectos: "Cefalea, estreñimiento, prolongación del intervalo QT", cuidados: "Precaución en pacientes con antecedentes de arritmias; monitorear ECG si hay factores de riesgo." },
+  { id: 17, nombre: "Dexametasona", comercial: "Decadron®", familia: "Corticoide", vias: ["EV", "IM", "VO"], dosis: "4-8 mg cada 8-24 h según indicación", dosisPed: "0,15–0,6 mg/kg/dosis según indicación (ej. laringitis/crup)", dilucion: "Administrar EV directo lento o diluido en 50-100 ml de SF", efectos: "Hiperglucemia, retención hidrosalina, inmunosupresión", cuidados: "Controlar glucemia; no suspender bruscamente en tratamientos prolongados." },
+  { id: 18, nombre: "Hidrocortisona", comercial: "Solu-Cortef®", familia: "Corticoide", vias: ["EV", "IM"], dosis: "100-300 mg/día según indicación (shock, insuficiencia suprarrenal)", dosisPed: "Manejo especializado en pediatría/UTI pediátrica-neonatal según protocolo — no estandarizada en esta referencia general, consultar al equipo tratante.", dilucion: "Diluir en 100 ml de SF 0.9%, a pasar en 20-30 min", efectos: "Hiperglucemia, hipertensión, retención de líquidos", cuidados: "Monitorear glucemia y balance hidroelectrolítico durante tratamientos prolongados." },
+  { id: 19, nombre: "Betametasona", comercial: "Celestone®", familia: "Corticoide", vias: ["EV", "IM"], dosis: "4-12 mg/día según indicación", dosisPed: "Manejo especializado en pediatría/UTI pediátrica-neonatal según protocolo — no estandarizada en esta referencia general, consultar al equipo tratante.", dilucion: "Administrar EV directo lento o diluido en 50-100 ml de SF", efectos: "Hiperglucemia, hipertensión, insomnio", cuidados: "Controlar glucemia; en maduración pulmonar fetal seguir esquema obstétrico específico." },
+  { id: 20, nombre: "Difenhidramina", comercial: "Benadryl®", familia: "Antihistamínico H1", vias: ["EV", "IM", "VO"], dosis: "25-50 mg cada 6-8 h", dosisPed: "1 mg/kg/dosis EV/IM/VO cada 6–8h (máx. 50mg/dosis)", dilucion: "Diluir en 50-100 ml de SF 0.9%, a pasar en 15-20 min", efectos: "Sedación marcada, sequedad de mucosas, hipotensión", cuidados: "Advertir somnolencia; precaución en adultos mayores por riesgo de caídas y confusión." },
+  { id: 21, nombre: "Salbutamol", comercial: "Ventolin®", familia: "Beta-2 agonista de acción corta", vias: ["Inhalatoria"], dosis: "2-4 disparos (100-200 mcg) o nebulización con 0.5-1 ml + 3 ml de SF", dosisPed: "2–4 puff con aerocámara según protocolo · Nebulizado 0,15 mg/kg (mín. 2,5mg)", dilucion: "Nebulizar diluido en 3-4 ml de SF 0.9% con flujo de O2 a 6-8 l/min", efectos: "Taquicardia, temblor, palpitaciones", cuidados: "Controlar frecuencia cardíaca; espaciar dosis en pacientes cardiópatas." },
+  { id: 22, nombre: "Ipratropio (Bromuro)", comercial: "Atrovent®", familia: "Anticolinérgico inhalatorio", vias: ["Inhalatoria"], dosis: "0.5 mg (2 ml) por nebulización cada 6-8 h", dosisPed: "250 mcg nebulizado cada 6–8h, asociado a salbutamol", dilucion: "Nebulizar solo o combinado con salbutamol, diluido en SF 0.9%", efectos: "Sequedad bucal, retención urinaria, visión borrosa", cuidados: "Evitar contacto con los ojos durante la nebulización; precaución en glaucoma." },
+  { id: 23, nombre: "Budesonida", comercial: "Pulmicort®", familia: "Corticoide inhalatorio", vias: ["Inhalatoria"], dosis: "0.5-1 mg por nebulización cada 12 h", dosisPed: "0,5 mg nebulizado cada 12h según indicación", dilucion: "Nebulizar directo o diluido en SF 0.9% según presentación", efectos: "Candidiasis oral, disfonía", cuidados: "Indicar enjuague bucal posterior a la administración para prevenir candidiasis." },
+  { id: 24, nombre: "Aminofilina", comercial: "Aminofilina®", familia: "Metilxantina broncodilatadora", vias: ["EV"], dosis: "Dosis de carga 5-6 mg/kg, mantenimiento según niveles séricos", dosisPed: "Manejo especializado en pediatría/UTI pediátrica-neonatal según protocolo — no estandarizada en esta referencia general, consultar al equipo tratante.", dilucion: "Diluir en 100-250 ml de SF 0.9% o Dx 5%, a pasar en 20-30 min (nunca en bolo rápido)", efectos: "Arritmias, convulsiones, náuseas, taquicardia", cuidados: "Infusión lenta obligatoria; monitoreo cardíaco continuo; margen terapéutico estrecho." },
+  { id: 25, nombre: "Furosemida", comercial: "Lasix®", familia: "Diurético de asa", vias: ["EV", "IM", "VO"], dosis: "20-40 mg EV cada 8-24 h según respuesta diurética", dosisPed: "1–2 mg/kg/dosis EV/VO (máx. 6 mg/kg/día)", dilucion: "Administrar EV directo lento (1-2 min) o diluido en 50 ml de SF", efectos: "Hipopotasemia, hipotensión, ototoxicidad (infusión rápida)", cuidados: "Controlar diuresis horaria, TA y ionograma; infundir lento en dosis altas." },
+  { id: 26, nombre: "Enalapril", comercial: "Renitec®", familia: "IECA antihipertensivo", vias: ["VO"], dosis: "5-20 mg cada 12-24 h", dosisPed: "Manejo especializado en pediatría/UTI pediátrica-neonatal según protocolo — no estandarizada en esta referencia general, consultar al equipo tratante.", dilucion: "No aplica (vía oral)", efectos: "Tos seca, hipotensión, hiperpotasemia", cuidados: "Controlar TA antes de cada administración; vigilar función renal y potasio." },
+  { id: 27, nombre: "Atenolol", comercial: "Tenormin®", familia: "Betabloqueante", vias: ["VO"], dosis: "25-100 mg cada 24 h", dosisPed: "Manejo especializado en pediatría/UTI pediátrica-neonatal según protocolo — no estandarizada en esta referencia general, consultar al equipo tratante.", dilucion: "No aplica (vía oral)", efectos: "Bradicardia, hipotensión, broncoespasmo", cuidados: "Controlar frecuencia cardíaca antes de administrar; no suspender bruscamente." },
+  { id: 28, nombre: "Nitroglicerina", comercial: "Nitroglicerina EV®", familia: "Vasodilatador", vias: ["EV"], dosis: "5-20 mcg/min en infusión continua, titulable según respuesta", dosisPed: "Manejo especializado en pediatría/UTI pediátrica-neonatal según protocolo — no estandarizada en esta referencia general, consultar al equipo tratante.", dilucion: "Diluir en SF 0.9% o Dx 5% en bomba de infusión continua, usar frasco/tubuladura no PVC", efectos: "Cefalea, hipotensión severa, taquicardia refleja", cuidados: "Monitoreo continuo de TA; usar bomba de infusión; controlar caída brusca de presión." },
+  { id: 29, nombre: "Adrenalina (Epinefrina)", comercial: "Adrenalina Level®", familia: "Vasopresor / broncodilatador", vias: ["EV", "IM", "SC"], dosis: "Paro cardíaco: 1 mg EV cada 3-5 min; anafilaxia: 0.3-0.5 mg IM", dosisPed: "RCP: 0,01 mg/kg EV/IO (máx. 1mg) cada 3–5 min · Anafilaxia: 0,01 mg/kg IM (máx. 0,3–0,5mg)", dilucion: "En RCP administrar EV directo seguido de flush; en infusión continua diluir en SF 0.9% en bomba", efectos: "Taquicardia, arritmias, hipertensión severa", cuidados: "Doble chequeo por ser droga de alto riesgo; monitoreo cardíaco continuo durante la infusión." },
+  { id: 30, nombre: "Noradrenalina", comercial: "Norepinefrina Level®", familia: "Vasopresor", vias: ["EV"], dosis: "Infusión continua 0.05-0.5 mcg/kg/min, titulable según TA", dosisPed: "Manejo especializado en pediatría/UTI pediátrica-neonatal según protocolo — no estandarizada en esta referencia general, consultar al equipo tratante.", dilucion: "Diluir en Dx 5% en bomba de infusión continua, administrar por vía central si es posible", efectos: "Hipertensión severa, arritmias, isquemia periférica en el sitio de infusión", cuidados: "Infundir preferentemente por vía central; controlar TA de forma continua; vigilar extravasación." },
+  { id: 31, nombre: "Amiodarona", comercial: "Atlansil®", familia: "Antiarrítmico", vias: ["EV", "VO"], dosis: "Carga 150 mg EV en 10 min, luego infusión de mantenimiento", dosisPed: "Manejo especializado en pediatría/UTI pediátrica-neonatal según protocolo — no estandarizada en esta referencia general, consultar al equipo tratante.", dilucion: "Diluir en Dx 5% (no usar SF por incompatibilidad), usar bomba de infusión", efectos: "Hipotensión, bradicardia, flebitis", cuidados: "Diluir únicamente en dextrosa 5%; monitoreo electrocardiográfico continuo." },
+  { id: 32, nombre: "Digoxina", comercial: "Lanoxin®", familia: "Glucósido cardiotónico", vias: ["EV", "VO"], dosis: "0.125-0.25 mg cada 24 h (ajustar según función renal)", dosisPed: "Manejo especializado en pediatría/UTI pediátrica-neonatal según protocolo — no estandarizada en esta referencia general, consultar al equipo tratante.", dilucion: "Administrar EV directo lento (mínimo 5 min) o diluido en 50 ml de SF", efectos: "Náuseas, arritmias, visión amarilla (signo de toxicidad)", cuidados: "Controlar frecuencia cardíaca antes de administrar (no dar si FC menor a 60); vigilar signos de intoxicación." },
+  { id: 33, nombre: "Heparina No Fraccionada", comercial: "Heparina Filaxis®", familia: "Anticoagulante", vias: ["EV", "SC"], dosis: "Infusión continua EV según KPTT o 5000 UI SC cada 8-12 h (profilaxis)", dosisPed: "Manejo especializado en pediatría/UTI pediátrica-neonatal según protocolo — no estandarizada en esta referencia general, consultar al equipo tratante.", dilucion: "Diluir en SF 0.9% en bomba de infusión continua para uso EV terapéutico", efectos: "Sangrados, trombocitopenia inducida por heparina", cuidados: "Controlar KPTT y signos de sangrado; rotar sitios de punción SC sin friccionar." },
+  { id: 34, nombre: "Enoxaparina", comercial: "Clexane®", familia: "Heparina de bajo peso molecular", vias: ["SC"], dosis: "40 mg cada 24 h (profilaxis) o 1 mg/kg cada 12 h (tratamiento)", dosisPed: "Manejo especializado en pediatría/UTI pediátrica-neonatal según protocolo — no estandarizada en esta referencia general, consultar al equipo tratante.", dilucion: "No requiere dilución; aplicación SC directa en tejido celular subcutáneo abdominal", efectos: "Hematomas en sitio de punción, sangrados, trombocitopenia", cuidados: "No frotar el sitio de inyección; rotar zonas de aplicación; no purgar burbuja de la jeringa prellenada." },
+  { id: 35, nombre: "Diazepam", comercial: "Valium®", familia: "Benzodiazepina", vias: ["EV", "VO"], dosis: "5-10 mg según indicación (sedación, convulsiones)", dosisPed: "0,2–0,3 mg/kg EV o rectal para convulsiones agudas, bajo supervisión", dilucion: "Administrar EV directo lento, no diluir en soluciones (precipita)", efectos: "Depresión respiratoria, sedación excesiva, hipotensión", cuidados: "No mezclar con otras soluciones; administrar en vena de buen calibre; monitorear respiración." },
+  { id: 36, nombre: "Midazolam", comercial: "Dormicum®", familia: "Benzodiazepina de acción corta", vias: ["EV", "IM"], dosis: "1-5 mg EV según sedación requerida", dosisPed: "0,05–0,1 mg/kg EV para sedación, bajo supervisión y monitoreo respiratorio continuo", dilucion: "Diluir en SF 0.9% si se requiere infusión continua; en bolo puede administrarse directo lento", efectos: "Depresión respiratoria, hipotensión, amnesia", cuidados: "Monitoreo continuo de saturación y frecuencia respiratoria; tener flumazenil disponible." },
+  { id: 37, nombre: "Lorazepam", comercial: "Trapax®", familia: "Benzodiazepina", vias: ["EV", "VO"], dosis: "1-4 mg según indicación", dosisPed: "0,05–0,1 mg/kg EV bajo supervisión y monitoreo respiratorio continuo", dilucion: "Diluir en igual volumen de SF 0.9% antes de administrar EV lento", efectos: "Sedación, depresión respiratoria, confusión en adultos mayores", cuidados: "Administrar lento; precaución en adultos mayores por riesgo de caídas." },
+  { id: 38, nombre: "Haloperidol", comercial: "Haldol®", familia: "Antipsicótico típico", vias: ["EV", "IM", "VO"], dosis: "2.5-5 mg según agitación psicomotriz", dosisPed: "Uso excepcional y especializado por psiquiatría infantil — no estandarizada aquí", dilucion: "Administrar IM directo o EV lento diluido en 50 ml de SF según protocolo institucional", efectos: "Síntomas extrapiramidales, prolongación del QT, sedación", cuidados: "Monitoreo ECG si uso EV; vigilar aparición de rigidez o distonía aguda." },
+  { id: 39, nombre: "Fenitoína", comercial: "Difenilhidantoína®", familia: "Anticonvulsivante", vias: ["EV", "VO"], dosis: "Carga 15-20 mg/kg EV, mantenimiento 100 mg cada 8 h", dosisPed: "Manejo especializado en pediatría/UTI pediátrica-neonatal según protocolo — no estandarizada en esta referencia general, consultar al equipo tratante.", dilucion: "Diluir únicamente en SF 0.9% (precipita con dextrosa), pasar a través de filtro en línea", efectos: "Arritmias, hipotensión, flebitis, síndrome del guante púrpura", cuidados: "Infundir lento (máx. 50 mg/min); no diluir en dextrosa; lavar vía con solución fisiológica antes y después." }
+];
+
+/* ============================================================
+   APLICACIÓN PRINCIPAL
+============================================================ */
+export default function App() {
+  const [session, setSession] = useState(null);
+  const [firmado, setFirmado] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [nombreFirmante, setNombreFirmante] = useState('');
+  const [aceptoTerminos, setAceptoTerminos] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  // Estados del Formulario Clínico
+  const [filiacion, setFiliacion] = useState({
+    nombre: "", edad: "", unidadEdad: "Años", sexo: SEXO_OPCIONES[0], domicilio: "", ciudadResidencia: CIUDAD_RESIDENCIA_OPCIONES[1], motivo: "", ayuno: "", tiempoQx: "", acompanante: ACOMPANANTE_OPCIONES[0], acompananteDetalle: "", tabaco: "Niega", alcohol: "Niega", estudios: ""
+  });
+  const [vitals, setVitals] = useState({ tas: "", tad: "", fc: "", fr: "", temp: "", sat: "", dolor: "0" });
+  const [glasgow, setGlasgow] = useState({ ocular: "4", verbal: "5", motora: "6" });
+  const [examen, setExamen] = useState({
+    pupilas: "Isocóricas normorreactivas", mucosas: "Rosadas y húmedas", carotideo: "Simétrico y de buena amplitud", mecanica: "Eupneico, sin tiraje", auscultacion: "Murmullo vesicular conservado bilateral", rha: "Presentes y normoactivos", palpacion: "Blando, depresible e indoloro", giordano: "Negativo bilateral", pulsos: "Presentes y simétricos", llenado: "Menor a 2 segundos", edema: "Sin edema", fuerza: "Conservada 5/5 en las cuatro extremidades", riesgoLPP: "Bajo riesgo", viasPerif: "", sondas: "", drenajes: ""
+  });
+  const [fisiologicos, setFisiologicos] = useState({ diuresis: "Presente, espontánea", catarsis: "Presente, conservada" });
+  const [meds, setMeds] = useState([]);
+  const [selectedMed, setSelectedMed] = useState("");
+  const [indicacionesExtra, setIndicacionesExtra] = useState("");
+
+  const [searchVademecum, setSearchVademecum] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    supabaseClient.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    if (error) alert('Error de autenticación: ' + error.message);
+    setLoading(false);
+  };
+
+  const handleLogout = async () => {
+    await supabaseClient.auth.signOut();
+    setFirmado(false);
+  };
+
+  const handleFirma = async (e) => {
+    e.preventDefault();
+    if (!aceptoTerminos) {
+      alert("Debe confirmar la aceptación de los términos de protección de datos.");
+      return;
+    }
+    setLoading(true);
+    const { error } = await supabaseClient.from('firmas_compromiso').insert([{
+      user_id: session.user.id,
+      nombre_firmante: nombreFirmante,
+      fecha_firma: new Date().toISOString()
+    }]);
+
+    if (error) {
+      alert('Error al registrar firma en la base de datos: ' + error.message);
+    } else {
+      setFirmado(true);
+    }
+    setLoading(false);
+  };
+
+  // Interpretaciones automáticas
+  const edadMesesVal = useMemo(() => edadEnMeses(filiacion.edad, filiacion.unidadEdad), [filiacion.edad, filiacion.unidadEdad]);
+  const intTA = useMemo(() => interpretaTA(vitals.tas, vitals.tad, edadMesesVal), [vitals.tas, vitals.tad, edadMesesVal]);
+  const intFC = useMemo(() => interpretaFC(vitals.fc, edadMesesVal), [vitals.fc, edadMesesVal]);
+  const intFR = useMemo(() => interpretaFR(vitals.fr, edadMesesVal), [vitals.fr, edadMesesVal]);
+  const intTemp = useMemo(() => interpretaTemp(vitals.temp), [vitals.temp]);
+  const intSat = useMemo(() => interpretaSat(vitals.sat), [vitals.sat]);
+  const glasgowTot = useMemo(() => totalGlasgow(glasgow), [glasgow]);
+  const intGlas = useMemo(() => interpretaGlasgow(glasgowTot), [glasgowTot]);
+
+  const addMed = () => {
+    if (!selectedMed) return;
+    const m = VADEMECUM.find((x) => x.id === +selectedMed);
+    if (!m) return;
+    if (meds.some((x) => x.id === m.id)) return;
+    setMeds([...meds, { ...m, viaElegida: m.vias[0], indicacion: m.dosis }]);
+    setSelectedMed("");
+  };
+
+  const removeMed = (id) => {
+    setMeds(meds.filter((m) => m.id !== id));
+  };
+
+  // Construcción de la Narrativa de Enfermería
+  const narrativa = useMemo(() => {
+    let p = [];
+    const nom = filiacion.nombre || "Paciente";
+    const ed = filiacion.edad ? `${filiacion.edad} ${filiacion.unidadEdad}` : "edad no consignada";
+    const sx = filiacion.sexo ? filiacion.sexo.toLowerCase() : "";
+    const dom = filiacion.domicilio ? `, con domicilio en ${filiacion.domicilio}` : "";
+    const ciu = filiacion.ciudadResidencia ? ` (${filiacion.ciudadResidencia})` : "";
+    const mot = filiacion.motivo ? `, que ingresa por ${filiacion.motivo}` : "";
+    const ay = filiacion.ayuno ? `. Refiere ${filiacion.ayuno} horas de ayuno` : "";
+    const tqx = filiacion.tiempoQx ? ` y ${filiacion.tiempoQx} de evolución quirúrgica` : "";
+    const ac = filiacion.acompanante ? `. Permanece acompañado/a por ${filiacion.acompanante.toLowerCase()}${filiacion.acompananteDetalle ? ` (${filiacion.acompananteDetalle})` : ""}` : "";
+    const tab = filiacion.tabaco === "Refiere" ? " Refiere consumo de tabaco." : "";
+    const alc = filiacion.alcohol === "Refiere" ? " Refiere consumo de alcohol." : "";
+    const est = filiacion.estudios ? `. Estudios complementarios aportados: ${filiacion.estudios}` : "";
+
+    p.push(`Se ingresa/valora a ${nom}, de ${ed} de edad, sexo ${sx}${dom}${ciu}${mot}${ay}${tqx}${ac}.${tab}${alc}${est}.`);
+
+    let sv = [];
+    if (vitals.tas && vitals.tad) sv.push(`tensión arterial de ${vitals.tas}/${vitals.tad} mmHg (${intTA?.texto || ""})`);
+    if (vitals.fc) sv.push(`frecuencia cardíaca de ${vitals.fc} bpm (${intFC?.texto || ""})`);
+    if (vitals.fr) sv.push(`frecuencia respiratoria de ${vitals.fr} rpm (${intFR?.texto || ""})`);
+    if (vitals.temp) sv.push(`temperatura axilar de ${vitals.temp} °C (${intTemp?.texto || ""})`);
+    if (vitals.sat) sv.push(`saturación de O2 al ${vitals.sat}% (${intSat?.texto || ""})`);
+    if (vitals.dolor) sv.push(`escala de dolor EVA ${vitals.dolor}/10`);
+
+    p.push(`Al control de signos vitales presenta: ${sv.join(", ")}.`);
+
+    if (intGlas) {
+      p.push(`A la valoración neurológica se encuentra ${intGlas}. Pupilas ${examen.pupilas.toLowerCase()}.`);
+    }
+
+    p.push(`Al examen físico segmentario: Mucosas ${examen.mucosas.toLowerCase()}, pulso carotídeo ${examen.carotideo.toLowerCase()}. En esfera cardiopulmonar, mecánica respiratoria ${examen.mecanica.toLowerCase()} y auscultación con ${examen.auscultacion.toLowerCase()}. Abdomen con ruidos hidroaéreos ${examen.rha.toLowerCase()}, a la palpación ${examen.palpacion.toLowerCase()}, signo de Giordano ${examen.giordano.toLowerCase()}. En extremidades, pulsos periféricos ${examen.pulsos.toLowerCase()}, llenado capilar ${examen.llenado.toLowerCase()}, ${examen.edema.toLowerCase()} y fuerza muscular ${examen.fuerza.toLowerCase()}.`);
+
+    let disp = [];
+    if (examen.viasPerif) disp.push(`vía periférica: ${examen.viasPerif}`);
+    if (examen.sondas) disp.push(`sondas: ${examen.sondas}`);
+    if (examen.drenajes) disp.push(`drenajes: ${examen.drenajes}`);
+    disp.push(`valoración de riesgo LPP: ${examen.riesgoLPP}`);
+
+    p.push(`Respecto a dispositivos y piel: ${disp.join("; ")}. Patrón de eliminación: diuresis ${fisiologicos.diuresis.toLowerCase()} y catarsis ${fisiologicos.catarsis.toLowerCase()}.`);
+
+    if (meds.length > 0) {
+      const listaMeds = meds.map((m) => `${m.nombre} (${m.viaElegida}, ${m.indicacion})`).join("; ");
+      p.push(`Plan farmacológico en curso: ${listaMeds}.`);
+    }
+
+    if (indicacionesExtra) {
+      p.push(`Indicaciones y observaciones complementarias: ${indicacionesExtra}`);
+    }
+
+    return p.join("\n\n");
+  }, [filiacion, vitals, glasgow, examen, fisiologicos, meds, indicacionesExtra, intTA, intFC, intFR, intTemp, intSat, intGlas]);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(narrativa);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleGuardarSupabase = async () => {
+    setLoading(true);
+    const registro = {
+      user_id: session.user.id,
+      paciente: filiacion.nombre || "Sin Nombre",
+      edad: `${filiacion.edad} ${filiacion.unidadEdad}`,
+      fc: vitals.fc,
+      ta: `${vitals.tas}/${vitals.tad}`,
+      temperatura: vitals.temp,
+      saturacion: vitals.sat,
+      glasgow: glasgowTot,
+      observaciones: narrativa,
+      fecha: new Date().toISOString()
+    };
+
+    const { error } = await supabaseClient.from('valoraciones').insert([registro]);
+
+    if (error) {
+      alert('Error al guardar la valoración en Supabase: ' + error.message);
+    } else {
+      alert('¡Valoración clínica registrada con éxito en la base de datos!');
+    }
+    setLoading(false);
+  };
+
+  const vademecumFiltrado = useMemo(() => {
+    if (!searchVademecum) return VADEMECUM;
+    const q = searchVademecum.toLowerCase();
+    return VADEMECUM.filter(
+      (m) =>
+        m.nombre.toLowerCase().includes(q) ||
+        m.comercial.toLowerCase().includes(q) ||
+        m.familia.toLowerCase().includes(q)
+    );
+  }, [searchVademecum]);
+
+  // PANTALLA 1: LOGIN
+  if (!session) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#F3F6F6] p-4">
+        <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full border border-[#DCE7E6]">
+          <div className="text-center mb-6">
+            <Stethoscope className="w-12 h-12 text-[#0B6E6E] mx-auto mb-2" />
+            <h1 className="text-2xl font-bold text-[#1E3547]">Estación de Valoración</h1>
+            <p className="text-xs text-gray-500 mt-1">Acceso institucional a la plataforma clínica</p>
+          </div>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-[#1E3547] mb-1">Correo institucional</label>
+              <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full p-2.5 text-sm border border-[#DCE7E6] rounded-md outline-none focus:ring-2 focus:ring-[#0B6E6E]" placeholder="estudiante@institucion.edu.ar" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-[#1E3547] mb-1">Contraseña</label>
+              <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full p-2.5 text-sm border border-[#DCE7E6] rounded-md outline-none focus:ring-2 focus:ring-[#0B6E6E]" placeholder="••••••••" />
+            </div>
+            <button type="submit" disabled={loading} className="w-full bg-[#0B6E6E] hover:bg-[#075252] text-white py-3 rounded-md font-bold text-sm transition-colors shadow">
+              {loading ? 'Validando...' : 'Ingresar al Sistema'}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // PANTALLA 2: FIRMA / HABEAS DATA
+  if (!firmado) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#F3F6F6] p-4">
+        <div className="bg-white p-8 rounded-xl shadow-lg max-w-lg w-full border border-[#DCE7E6]">
+          <div className="flex items-center space-x-3 mb-4 text-[#0B6E6E]">
+            <ShieldCheck className="w-8 h-8" />
+            <h2 className="text-xl font-bold text-[#1E3547]">Protección de Datos & Consentimiento</h2>
+          </div>
+          <p className="text-xs text-gray-600 mb-6 leading-relaxed">
+            Declaro bajo juramento académico que la información registrada durante las valoraciones de enfermería se apega a las normativas vigentes de confidencialidad y Habeas Data para el manejo seguro de datos clínicos.
+          </p>
+          <form onSubmit={handleFirma} className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-[#1E3547] mb-1">Nombre, Apellido y Legajo/DNI del Responsable</label>
+              <input type="text" required value={nombreFirmante} onChange={(e) => setNombreFirmante(e.target.value)} className="w-full p-2.5 text-sm border border-[#DCE7E6] rounded-md outline-none focus:ring-2 focus:ring-[#0B6E6E]" placeholder="Ej: Macarena Zapatta - Legajo 12345" />
+            </div>
+            <div className="flex items-center space-x-2">
+              <input type="checkbox" id="checkFirma" checked={aceptoTerminos} onChange={(e) => setAceptoTerminos(e.target.checked)} className="w-4 h-4 text-[#0B6E6E]" />
+              <label htmlFor="checkFirma" className="text-xs text-gray-700">Acepto la declaración de confidencialidad y registro digital.</label>
+            </div>
+            <button type="submit" disabled={loading} className="w-full bg-[#0B6E6E] hover:bg-[#075252] text-white py-3 rounded-md font-bold text-sm transition-colors shadow">
+              {loading ? 'Registrando firma...' : 'Firmar y Acceder a la Estación'}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // PANTALLA 3: ESTACIÓN COMPLETA DE VALORACIÓN
+  return (
+    <div className="min-h-screen bg-[#F3F6F6] text-[#1E3547] pb-12">
+      {/* Top Header */}
+      <header className="bg-white border-b border-[#DCE7E6] sticky top-0 z-30 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
+          <div className="flex items-center space-x-3">
+            <div className="bg-[#0B6E6E] text-white p-2 rounded-lg">
+              <Stethoscope className="w-6 h-6" />
+            </div>
+            <div>
+              <h1 className="font-bold text-lg leading-tight text-[#1E3547]">Estación de Valoración de Enfermería</h1>
+              <p className="text-xs text-gray-500">Plataforma Académica de Registro Clínico</p>
+            </div>
+          </div>
+          <button onClick={handleLogout} className="flex items-center space-x-1.5 bg-red-50 text-red-600 hover:bg-red-100 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors">
+            <LogOut className="w-4 h-4" />
+            <span>Cerrar Sesión</span>
+          </button>
+        </div>
+      </header>
+
+      {/* Main Container */}
+      <main className="max-w-7xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left Column: Form Section */}
+        <div className="lg:col-span-7 space-y-6">
+          
+          {/* Filiación */}
+          <section className="bg-white p-5 rounded-xl border border-[#DCE7E6] shadow-sm">
+            <h2 className="font-bold text-base text-[#1E3547] mb-4 flex items-center space-x-2 border-b border-gray-100 pb-2">
+              <ClipboardList className="w-5 h-5 text-[#0B6E6E]" />
+              <span>1. Filiación y Datos de Ingreso</span>
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              {FILIACION_FIELDS.map((f) => (
+                <div key={f.key} className={f.type === "textarea" ? "md:col-span-2" : ""}>
+                  <label className="block font-semibold text-gray-700 mb-1">{f.label}</label>
+                  {f.type === "select" ? (
+                    <select value={filiacion[f.key]} onChange={(e) => setFiliacion({ ...filiacion, [f.key]: e.target.value })} className="w-full p-2 border border-[#DCE7E6] rounded-md outline-none focus:ring-1 focus:ring-[#0B6E6E]">
+                      {f.options.map((o) => (
+                        <option key={o} value={o}>{o}</option>
+                      ))}
+                    </select>
+                  ) : f.type === "textarea" ? (
+                    <textarea rows={2} value={filiacion[f.key]} onChange={(e) => setFiliacion({ ...filiacion, [f.key]: e.target.value })} placeholder={f.placeholder} className="w-full p-2 border border-[#DCE7E6] rounded-md outline-none focus:ring-1 focus:ring-[#0B6E6E]" />
+                  ) : (
+                    <input type={f.type} value={filiacion[f.key]} onChange={(e) => setFiliacion({ ...filiacion, [f.key]: e.target.value })} placeholder={f.placeholder} className="w-full p-2 border border-[#DCE7E6] rounded-md outline-none focus:ring-1 focus:ring-[#0B6E6E]" />
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Signos Vitales y Glasgow */}
+          <section className="bg-white p-5 rounded-xl border border-[#DCE7E6] shadow-sm">
+            <h2 className="font-bold text-base text-[#1E3547] mb-4 flex items-center space-x-2 border-b border-gray-100 pb-2">
+              <Activity className="w-5 h-5 text-[#0B6E6E]" />
+              <span>2. Signos Vitales y Escala de Glasgow</span>
+            </h2>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs mb-4">
+              <div>
+                <label className="block font-semibold text-gray-700 mb-1">TAS (mmHg)</label>
+                <input type="number" value={vitals.tas} onChange={(e) => setVitals({ ...vitals, tas: e.target.value })} placeholder="120" className="w-full p-2 border border-[#DCE7E6] rounded-md" />
+              </div>
+              <div>
+                <label className="block font-semibold text-gray-700 mb-1">TAD (mmHg)</label>
+                <input type="number" value={vitals.tad} onChange={(e) => setVitals({ ...vitals, tad: e.target.value })} placeholder="80" className="w-full p-2 border border-[#DCE7E6] rounded-md" />
+              </div>
+              <div>
+                <label className="block font-semibold text-gray-700 mb-1">FC (bpm)</label>
+                <input type="number" value={vitals.fc} onChange={(e) => setVitals({ ...vitals, fc: e.target.value })} placeholder="75" className="w-full p-2 border border-[#DCE7E6] rounded-md" />
+              </div>
+              <div>
+                <label className="block font-semibold text-gray-700 mb-1">FR (rpm)</label>
+                <input type="number" value={vitals.fr} onChange={(e) => setVitals({ ...vitals, fr: e.target.value })} placeholder="16" className="w-full p-2 border border-[#DCE7E6] rounded-md" />
+              </div>
+              <div>
+                <label className="block font-semibold text-gray-700 mb-1">Temp (°C)</label>
+                <input type="number" step="0.1" value={vitals.temp} onChange={(e) => setVitals({ ...vitals, temp: e.target.value })} placeholder="36.5" className="w-full p-2 border border-[#DCE7E6] rounded-md" />
+              </div>
+              <div>
+                <label className="block font-semibold text-gray-700 mb-1">SatO2 (%)</label>
+                <input type="number" value={vitals.sat} onChange={(e) => setVitals({ ...vitals, sat: e.target.value })} placeholder="98" className="w-full p-2 border border-[#DCE7E6] rounded-md" />
+              </div>
+            </div>
+
+            {/* Escala de Glasgow */}
+            <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 text-xs mb-4">
+              <span className="font-bold text-[#1E3547] block mb-2">Escala de Glasgow:</span>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-gray-600 mb-0.5">Respuesta Ocular</label>
+                  <select value={glasgow.ocular} onChange={(e) => setGlasgow({ ...glasgow, ocular: e.target.value })} className="w-full p-1.5 border rounded">
+                    <option value="4">4 - Espontánea</option>
+                    <option value="3">3 - Al orden verbal</option>
+                    <option value="2">2 - Al dolor</option>
+                    <option value="1">1 - Ausente</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-gray-600 mb-0.5">Respuesta Verbal</label>
+                  <select value={glasgow.verbal} onChange={(e) => setGlasgow({ ...glasgow, verbal: e.target.value })} className="w-full p-1.5 border rounded">
+                    <option value="5">5 - Orientado</option>
+                    <option value="4">4 - Confuso</option>
+                    <option value="3">3 - Inapropiado</option>
+                    <option value="2">2 - Incomprensible</option>
+                    <option value="1">1 - Ausente</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-gray-600 mb-0.5">Respuesta Motora</label>
+                  <select value={glasgow.motora} onChange={(e) => setGlasgow({ ...glasgow, motora: e.target.value })} className="w-full p-1.5 border rounded">
+                    <option value="6">6 - Obedece órdenes</option>
+                    <option value="5">5 - Localiza el dolor</option>
+                    <option value="4">4 - Retirada al dolor</option>
+                    <option value="3">3 - Flexión anormal</option>
+                    <option value="2">2 - Extensión anormal</option>
+                    <option value="1">1 - Ausente</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Alertas dinámicas de signos vitales */}
+            <div className="space-y-1 text-xs">
+              {intTA && <div className={`p-2 rounded flex items-center space-x-2 ${intTA.alerta ? 'bg-[#FBF1E3] text-[#9A5B13]' : 'bg-emerald-50 text-emerald-800'}`}><AlertTriangle className="w-4 h-4" /><span>{intTA.texto}</span></div>}
+              {intFC && <div className={`p-2 rounded flex items-center space-x-2 ${intFC.alerta ? 'bg-[#FBF1E3] text-[#9A5B13]' : 'bg-emerald-50 text-emerald-800'}`}><AlertTriangle className="w-4 h-4" /><span>{intFC.texto}</span></div>}
+              {intFR && <div className={`p-2 rounded flex items-center space-x-2 ${intFR.alerta ? 'bg-[#FBF1E3] text-[#9A5B13]' : 'bg-emerald-50 text-emerald-800'}`}><AlertTriangle className="w-4 h-4" /><span>{intFR.texto}</span></div>}
+            </div>
+          </section>
+
+          {/* Examen Físico Segmentario */}
+          <section className="bg-white p-5 rounded-xl border border-[#DCE7E6] shadow-sm">
+            <h2 className="font-bold text-base text-[#1E3547] mb-4 flex items-center space-x-2 border-b border-gray-100 pb-2">
+              <Stethoscope className="w-5 h-5 text-[#0B6E6E]" />
+              <span>3. Examen Físico Segmentario</span>
+            </h2>
+            <div className="space-y-4 text-xs">
+              {EXAMEN_SECCIONES.map((sec) => (
+                <div key={sec.id} className="border border-gray-100 p-3 rounded-lg bg-gray-50/50">
+                  <h3 className="font-bold text-gray-800 mb-2 flex items-center space-x-1.5">
+                    <sec.icon className="w-4 h-4 text-[#0B6E6E]" />
+                    <span>{sec.titulo}</span>
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {sec.campos.map((c) => (
+                      <div key={c.key}>
+                        <label className="block text-gray-600 mb-0.5">{c.label}</label>
+                        {c.type === "select" ? (
+                          <select value={examen[c.key]} onChange={(e) => setExamen({ ...examen, [c.key]: e.target.value })} className="w-full p-1.5 border border-[#DCE7E6] rounded bg-white">
+                            {c.options.map((o) => (
+                              <option key={o} value={o}>{o}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input type="text" value={examen[c.key]} onChange={(e) => setExamen({ ...examen, [c.key]: e.target.value })} placeholder={c.placeholder} className="w-full p-1.5 border border-[#DCE7E6] rounded bg-white" />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Plan Farmacológico / Vademécum Integrado */}
+          <section className="bg-white p-5 rounded-xl border border-[#DCE7E6] shadow-sm">
+            <h2 className="font-bold text-base text-[#1E3547] mb-4 flex items-center space-x-2 border-b border-gray-100 pb-2">
+              <Pill className="w-5 h-5 text-[#0B6E6E]" />
+              <span>4. Farmacoterapia e Indicaciones</span>
+            </h2>
+            <div className="text-xs space-y-3">
+              <div className="flex space-x-2">
+                <select value={selectedMed} onChange={(e) => setSelectedMed(e.target.value)} className="flex-1 p-2 border rounded-md">
+                  <option value="">-- Seleccionar fármaco del Vademécum --</option>
+                  {VADEMECUM.map((m) => (
+                    <option key={m.id} value={m.id}>{m.nombre} ({m.comercial})</option>
+                  ))}
+                </select>
+                <button type="button" onClick={addMed} className="bg-[#0B6E6E] text-white px-3 py-2 rounded-md font-semibold hover:bg-[#075252] flex items-center space-x-1">
+                  <Plus className="w-4 h-4" />
+                  <span>Agregar</span>
+                </button>
+              </div>
+
+              {/* Fármacos agregados */}
+              {meds.length > 0 && (
+                <div className="space-y-2 mt-3">
+                  {meds.map((m) => (
+                    <div key={m.id} className="p-3 bg-teal-50/50 border border-teal-100 rounded-lg flex justify-between items-start">
+                      <div>
+                        <span className="font-bold text-[#0B6E6E]">{m.nombre}</span> <span className="text-gray-500">({m.comercial})</span>
+                        <p className="text-gray-600 mt-0.5">Indicación: {m.indicacion}</p>
+                        <p className="text-gray-500 italic text-[11px]">Cuidados: {m.cuidados}</p>
+                      </div>
+                      <button onClick={() => removeMed(m.id)} className="text-red-500 hover:text-red-700 p-1">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div>
+                <label className="block font-semibold text-gray-700 mb-1">Indicaciones u Observaciones Adicionales</label>
+                <textarea rows={2} value={indicacionesExtra} onChange={(e) => setIndicacionesExtra(e.target.value)} placeholder="Otras indicaciones médicas o intervenciones de enfermería..." className="w-full p-2 border rounded-md outline-none focus:ring-1 focus:ring-[#0B6E6E]" />
+              </div>
+            </div>
+          </section>
+
+        </div>
+
+        {/* Right Column: Narrative Document & Vademecum Lookup */}
+        <div className="lg:col-span-5 space-y-6">
+          
+          {/* Narrativa Clínica Generada */}
+          <div className="bg-white p-5 rounded-xl border border-[#DCE7E6] shadow-sm sticky top-20">
+            <div className="flex justify-between items-center mb-3 border-b border-gray-100 pb-2">
+              <h2 className="font-bold text-base text-[#1E3547] flex items-center space-x-2">
+                <FileText className="w-5 h-5 text-[#0B6E6E]" />
+                <span>Informe Narrativo Clínico</span>
+              </h2>
+              <button onClick={handleCopy} className="flex items-center space-x-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2.5 py-1.5 rounded font-semibold transition-colors">
+                {copied ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copied ? '¡Copiado!' : 'Copiar'}</span>
+              </button>
+            </div>
+
+            <div className="bg-[#F8FAFA] p-4 rounded-lg border border-[#DCE7E6] text-xs font-serif leading-relaxed text-gray-800 whitespace-pre-wrap max-h-[350px] overflow-y-auto">
+              {narrativa}
+            </div>
+
+            <button onClick={handleGuardarSupabase} disabled={loading} className="w-full mt-4 bg-[#0B6E6E] hover:bg-[#075252] text-white py-3 rounded-lg font-bold text-sm transition-colors shadow flex items-center justify-center space-x-2">
+              <ClipboardList className="w-4 h-4" />
+              <span>{loading ? 'Guardando en Supabase...' : 'Guardar Valoración en Base de Datos'}</span>
+            </button>
+          </div>
+
+          {/* Vademécum de Consulta Rápida */}
+          <div className="bg-white p-5 rounded-xl border border-[#DCE7E6] shadow-sm">
+            <h2 className="font-bold text-base text-[#1E3547] mb-3 flex items-center space-x-2 border-b border-gray-100 pb-2">
+              <BookOpen className="w-5 h-5 text-[#0B6E6E]" />
+              <span>Vademécum de Consulta Rápida</span>
+            </h2>
+            <div className="relative mb-3">
+              <Search className="w-4 h-4 absolute left-2.5 top-2.5 text-gray-400" />
+              <input type="text" value={searchVademecum} onChange={(e) => setSearchVademecum(e.target.value)} placeholder="Buscar fármaco o familia..." className="w-full pl-8 pr-3 py-1.5 border rounded-md text-xs outline-none focus:ring-1 focus:ring-[#0B6E6E]" />
+            </div>
+
+            <div className="space-y-2 max-h-[280px] overflow-y-auto text-xs pr-1">
+              {vademecumFiltrado.map((m) => (
+                <div key={m.id} className="p-2.5 border rounded-lg bg-gray-50/50 hover:bg-gray-50">
+                  <div className="font-bold text-[#1E3547]">{m.nombre} <span className="text-gray-500 font-normal">({m.comercial})</span></div>
+                  <p className="text-[11px] text-[#0B6E6E] font-medium">{m.familia}</p>
+                  <p className="text-gray-600 mt-1"><strong>Dosis:</strong> {m.dosis}</p>
+                  {m.dosisPed && <p className="text-gray-600"><strong>Dosis Ped.:</strong> {m.dosisPed}</p>}
+                  <p className="text-gray-500 text-[11px] mt-0.5"><strong>Dilución:</strong> {m.dilucion}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+        </div>
+      </main>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
